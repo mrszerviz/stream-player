@@ -6,31 +6,19 @@
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { background: transparent; font-family: Arial, sans-serif; width: 400px; }
-
-  #player-box {
-    background: rgba(0,0,0,0.85);
-    border-radius: 12px;
-    padding: 12px;
-    color: #fff;
-  }
-
+  #player-box { background: rgba(0,0,0,0.85); border-radius: 12px; padding: 12px; color: #fff; }
   #yt-player { width: 100%; height: 220px; border-radius: 8px; display: none; }
-
   #title { font-size: 15px; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 8px 0 2px; }
   #info { font-size: 13px; color: #ccc; min-height: 18px; }
-
   #controls { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
   button { background: #555; border: none; color: #fff; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; }
   button:hover { background: #333; }
-
   #vol-wrap { display: flex; align-items: center; gap: 6px; flex: 1; }
   #vol-wrap label { font-size: 12px; color: #aaa; white-space: nowrap; }
   input[type=range] { flex: 1; accent-color: #ff0000; }
-
   #queue { margin-top: 10px; max-height: 120px; overflow-y: auto; }
   #queue h4 { font-size: 12px; color: #888; margin-bottom: 4px; }
   .queue-item { font-size: 12px; padding: 3px 6px; background: rgba(255,255,255,0.07); border-radius: 4px; margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
   #no-song { text-align: center; padding: 20px; color: #666; font-size: 13px; }
 </style>
 </head>
@@ -51,57 +39,39 @@
   <div id="queue"><h4>Sor:</h4><div id="queue-list"></div></div>
 </div>
 
-<script src="https://www.youtube.com/iframe_api"></script>
-<script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-app.js";
-  import { getDatabase, ref, onValue, remove } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-database.js";
-
-  const app = initializeApp({
-    apiKey: "AIzaSyC_Fo6r0oQ8XjOuZoY4yXU8EwQ_glfEHlc",
-    authDomain: "songrequest-aa576.firebaseapp.com",
-    databaseURL: "https://songrequest-aa576-default-rtdb.europe-west1.firebasedatabase.app",
-    projectId: "songrequest-aa576",
-    storageBucket: "songrequest-aa576.firebasestorage.app",
-    messagingSenderId: "917847441742",
-    appId: "1:917847441742:web:6ab5f8008a8d8cbebade1f"
-  });
-
-  const db = getDatabase(app);
-  const queueRef = ref(db, 'queue');
-
+<script>
   let ytPlayer = null;
   let ytReady = false;
   let currentKey = null;
   let queue = [];
   let pendingSong = null;
+  let removeRef = null;
 
-  // YT API callback globálisan kell
-  window.onYouTubeIframeAPIReady = () => {
+  // 1. YT callback definiálva MIELŐTT az API script betölt
+  window.onYouTubeIframeAPIReady = function() {
     ytPlayer = new YT.Player('yt-player', {
-      height: '220',
-      width: '100%',
+      height: '220', width: '100%',
       playerVars: { autoplay: 1, rel: 0, iv_load_policy: 3, modestbranding: 1 },
       events: {
-        onReady: () => {
+        onReady: function() {
           ytReady = true;
           ytPlayer.setVolume(80);
           if (pendingSong) { loadSong(pendingSong); pendingSong = null; }
         },
-        onStateChange: (e) => {
-          // Dal vége: 0 = ended
+        onStateChange: function(e) {
           if (e.data === YT.PlayerState.ENDED) skipSong();
         }
       }
     });
   };
 
-  function loadSong({ key, song }) {
-    currentKey = key;
-    ytPlayer.loadVideoById(song.videoId);
+  function loadSong(item) {
+    currentKey = item.key;
+    ytPlayer.loadVideoById(item.song.videoId);
     document.getElementById('yt-player').style.display = 'block';
     document.getElementById('no-song').style.display = 'none';
-    document.getElementById('title').textContent = song.title;
-    document.getElementById('info').textContent = '🎵 Kérte: ' + song.requester;
+    document.getElementById('title').textContent = item.song.title;
+    document.getElementById('info').textContent = '🎵 Kérte: ' + item.song.requester;
     document.getElementById('controls').style.display = 'flex';
   }
 
@@ -110,28 +80,10 @@
     loadSong({ key, song });
   }
 
-  onValue(queueRef, (snap) => {
-    const data = snap.val();
-    queue = data ? Object.entries(data).sort((a,b) => a[1].ts - b[1].ts) : [];
-    renderQueue();
-
-    if (queue.length > 0 && !currentKey) {
-      playSong(...queue[0]);
-    } else if (queue.length === 0) {
-      currentKey = null;
-      if (ytReady) ytPlayer.stopVideo();
-      document.getElementById('yt-player').style.display = 'none';
-      document.getElementById('no-song').style.display = 'block';
-      document.getElementById('controls').style.display = 'none';
-      document.getElementById('title').textContent = '';
-      document.getElementById('info').textContent = '';
-    }
-  });
-
   function renderQueue() {
     const list = document.getElementById('queue-list');
     list.innerHTML = '';
-    queue.forEach(([k, s], i) => {
+    queue.forEach(function([k, s], i) {
       const d = document.createElement('div');
       d.className = 'queue-item';
       d.textContent = (i === 0 ? '▶ ' : (i+1)+'. ') + s.title + ' — ' + s.requester;
@@ -139,18 +91,60 @@
     });
   }
 
-  window.skipSong = async () => {
+  window.skipSong = async function() {
     if (!currentKey) return;
     const key = currentKey;
     currentKey = null;
     if (ytReady) ytPlayer.stopVideo();
-    await remove(ref(db, 'queue/' + key));
+    if (removeRef) await removeRef(key);
   };
 
-  window.setVol = (v) => {
+  window.setVol = function(v) {
     document.getElementById('vol-label').textContent = v + '%';
     if (ytReady) ytPlayer.setVolume(Number(v));
   };
+
+  // 2. Firebase dynamic import
+  Promise.all([
+    import('https://www.gstatic.com/firebasejs/12.15.0/firebase-app.js'),
+    import('https://www.gstatic.com/firebasejs/12.15.0/firebase-database.js')
+  ]).then(function([{ initializeApp }, { getDatabase, ref, onValue, remove }]) {
+    const app = initializeApp({
+      apiKey: "AIzaSyC_Fo6r0oQ8XjOuZoY4yXU8EwQ_glfEHlc",
+      authDomain: "songrequest-aa576.firebaseapp.com",
+      databaseURL: "https://songrequest-aa576-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId: "songrequest-aa576",
+      storageBucket: "songrequest-aa576.firebasestorage.app",
+      messagingSenderId: "917847441742",
+      appId: "1:917847441742:web:6ab5f8008a8d8cbebade1f"
+    });
+
+    const db = getDatabase(app);
+    const queueRef = ref(db, 'queue');
+
+    removeRef = function(key) { return remove(ref(db, 'queue/' + key)); };
+
+    onValue(queueRef, function(snap) {
+      const data = snap.val();
+      queue = data ? Object.entries(data).sort(function(a,b){ return a[1].ts - b[1].ts; }) : [];
+      renderQueue();
+
+      if (queue.length > 0 && !currentKey) {
+        playSong(...queue[0]);
+      } else if (queue.length === 0) {
+        currentKey = null;
+        if (ytReady) ytPlayer.stopVideo();
+        document.getElementById('yt-player').style.display = 'none';
+        document.getElementById('no-song').style.display = 'block';
+        document.getElementById('controls').style.display = 'none';
+        document.getElementById('title').textContent = '';
+        document.getElementById('info').textContent = '';
+      }
+    });
+  });
 </script>
+
+<!-- 3. YT API script a callback UTÁN tölt be -->
+<script src="https://www.youtube.com/iframe_api"></script>
 </body>
 </html>
