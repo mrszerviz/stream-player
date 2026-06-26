@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Song Request</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #111; color: #fff; font-family: Arial, sans-serif; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 20px; }
+  h1 { font-size: 22px; margin-bottom: 4px; color: #ff4444; }
+  p { font-size: 13px; color: #888; margin-bottom: 20px; }
+
+  #search-box { display: flex; gap: 8px; width: 100%; max-width: 480px; }
+  #search-box input { flex: 1; padding: 10px 14px; border-radius: 8px; border: none; background: #222; color: #fff; font-size: 14px; }
+  #search-box input:focus { outline: 2px solid #ff4444; }
+  #search-box button { padding: 10px 18px; background: #ff4444; border: none; color: #fff; border-radius: 8px; cursor: pointer; font-size: 14px; }
+  #search-box button:hover { background: #cc0000; }
+
+  #name-row { display: flex; gap: 8px; width: 100%; max-width: 480px; margin-bottom: 12px; }
+  #name-row input { flex: 1; padding: 10px 14px; border-radius: 8px; border: none; background: #222; color: #fff; font-size: 14px; }
+  #name-row input:focus { outline: 2px solid #ff4444; }
+
+  #results { width: 100%; max-width: 480px; margin-top: 14px; }
+  .result-item { display: flex; align-items: center; gap: 10px; background: #1a1a1a; border-radius: 8px; padding: 8px; margin-bottom: 8px; cursor: pointer; transition: background 0.2s; }
+  .result-item:hover { background: #2a2a2a; }
+  .result-item img { width: 80px; height: 45px; border-radius: 4px; object-fit: cover; }
+  .result-info { flex: 1; overflow: hidden; }
+  .result-title { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .result-ch { font-size: 11px; color: #888; margin-top: 2px; }
+  .req-btn { background: #ff4444; border: none; color: #fff; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; white-space: nowrap; }
+  .req-btn:hover { background: #cc0000; }
+
+  #queue-section { width: 100%; max-width: 480px; margin-top: 24px; }
+  #queue-section h3 { font-size: 15px; color: #aaa; margin-bottom: 8px; }
+  .q-item { background: #1a1a1a; border-radius: 6px; padding: 8px 12px; margin-bottom: 6px; font-size: 13px; }
+  .q-item span { color: #888; font-size: 11px; }
+
+  #msg { width: 100%; max-width: 480px; margin-top: 12px; font-size: 13px; min-height: 20px; color: #4fc; }
+  #loading { color: #888; font-size: 13px; display: none; margin-top: 8px; }
+</style>
+</head>
+<body>
+<h1>🎵 Song Request</h1>
+<p>Kérj dalt a streamhez!</p>
+
+<div id="name-row">
+  <input id="name-input" type="text" placeholder="A neved (pl. CoolViewer123)" maxlength="30">
+</div>
+
+<div id="search-box">
+  <input id="search-input" type="text" placeholder="YouTube keresés vagy link..." onkeydown="if(event.key==='Enter')search()">
+  <button onclick="search()">🔍 Keresés</button>
+</div>
+
+<div id="loading">Keresés...</div>
+<div id="msg"></div>
+<div id="results"></div>
+
+<div id="queue-section">
+  <h3>📋 Sor</h3>
+  <div id="queue-list"></div>
+</div>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-app.js";
+  import { getDatabase, ref, push, onValue, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-database.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyC_Fo6r0oQ8XjOuZoY4yXU8EwQ_glfEHlc",
+    authDomain: "songrequest-aa576.firebaseapp.com",
+    databaseURL: "https://songrequest-aa576-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId: "songrequest-aa576",
+    storageBucket: "songrequest-aa576.firebasestorage.app",
+    messagingSenderId: "917847441742",
+    appId: "1:917847441742:web:6ab5f8008a8d8cbebade1f"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getDatabase(app);
+  const queueRef = ref(db, 'queue');
+
+  // YouTube keresés proxy nélkül: oEmbed + videó ID kinyerése
+  const YT_KEY = 'AIzaSyC_Fo6r0oQ8XjOuZoY4yXU8EwQ_glfEHlc'; // Ha van saját API kulcsod, cseréld le!
+
+  function extractVideoId(url) {
+    const m = url.match(/(?:v=|youtu\.be\/|embed\/)([A-Za-z0-9_-]{11})/);
+    return m ? m[1] : null;
+  }
+
+  window.search = async () => {
+    const q = document.getElementById('search-input').value.trim();
+    if (!q) return;
+    const loading = document.getElementById('loading');
+    const results = document.getElementById('results');
+    results.innerHTML = '';
+    setMsg('');
+
+    // Ha direkt YouTube link
+    const vid = extractVideoId(q);
+    if (vid) {
+      loading.style.display = 'block';
+      try {
+        const res = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${vid}&format=json`);
+        const data = await res.json();
+        loading.style.display = 'none';
+        renderResults([{ id: vid, title: data.title, channel: data.author_name, thumb: `https://img.youtube.com/vi/${vid}/mqdefault.jpg` }]);
+      } catch {
+        loading.style.display = 'none';
+        setMsg('❌ Nem sikerült betölteni a videót.');
+      }
+      return;
+    }
+
+    // Keresés YouTube Data API v3-mal
+    loading.style.display = 'block';
+    try {
+      const res = await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=5&q=${encodeURIComponent(q)}&key=${YT_KEY}`);
+      const data = await res.json();
+      loading.style.display = 'none';
+      if (!data.items || data.items.length === 0) { setMsg('Nincs találat.'); return; }
+      renderResults(data.items.map(i => ({
+        id: i.id.videoId,
+        title: i.snippet.title,
+        channel: i.snippet.channelTitle,
+        thumb: i.snippet.thumbnails.default.url
+      })));
+    } catch {
+      loading.style.display = 'none';
+      setMsg('❌ Keresési hiba. Próbálj YouTube linket beilleszteni!');
+    }
+  };
+
+  function renderResults(items) {
+    const results = document.getElementById('results');
+    results.innerHTML = '';
+    items.forEach(item => {
+      const d = document.createElement('div');
+      d.className = 'result-item';
+      d.innerHTML = `
+        <img src="${item.thumb}" alt="">
+        <div class="result-info">
+          <div class="result-title">${item.title}</div>
+          <div class="result-ch">${item.channel}</div>
+        </div>
+        <button class="req-btn" onclick="requestSong('${item.id}', \`${item.title.replace(/`/g,'')}\`)">+ Kérés</button>
+      `;
+      results.appendChild(d);
+    });
+  }
+
+  window.requestSong = async (videoId, title) => {
+    const name = document.getElementById('name-input').value.trim() || 'Névtelen';
+    await push(queueRef, { videoId, title, requester: name, ts: Date.now() });
+    setMsg('✅ Dal hozzáadva a sorhoz!');
+    document.getElementById('results').innerHTML = '';
+    document.getElementById('search-input').value = '';
+  };
+
+  // Sor megjelenítése
+  onValue(queueRef, (snap) => {
+    const data = snap.val();
+    const list = document.getElementById('queue-list');
+    list.innerHTML = '';
+    if (!data) { list.innerHTML = '<div style="color:#555;font-size:13px">A sor üres.</div>'; return; }
+    Object.entries(data).sort((a,b)=>a[1].ts-b[1].ts).forEach(([k,s], i) => {
+      const d = document.createElement('div');
+      d.className = 'q-item';
+      d.innerHTML = `${i===0?'▶ <b>':''}${i+1}. ${s.title}${i===0?'</b>':''} <span>— ${s.requester}</span>`;
+      list.appendChild(d);
+    });
+  });
+
+  function setMsg(t) { document.getElementById('msg').textContent = t; }
+</script>
+</body>
+</html>
