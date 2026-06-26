@@ -24,13 +24,15 @@
 </head>
 <body>
 <div id="player-box">
+  <div style="text-align:right;margin-bottom:6px">
+    <button onclick="popOut()" title="Kiugró ablak">⧉ Pop-out</button>
+  </div>
   <iframe id="yt-frame" allow="autoplay; encrypted-media" allowfullscreen></iframe>
   <div id="no-song">Nincs dal a sorban...</div>
   <div id="title"></div>
   <div id="info"></div>
   <div id="controls" style="display:none">
     <button onclick="skipSong()">⏭ Skip</button>
-    <button onclick="popOut()" title="Kiugró ablak">⧉</button>
     <div id="vol-wrap">
       <label>🔊</label>
       <input type="range" id="vol" min="0" max="100" value="80" oninput="setVol(this.value)">
