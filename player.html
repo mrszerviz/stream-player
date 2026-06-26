@@ -3,25 +3,6 @@
 <head>
 <meta charset="UTF-8">
 <title>Stream Player</title>
-<!-- Ad blocker: ismert reklám domain-ek blokkolása -->
-<script>
-  (function() {
-    const adHosts = [
-      'doubleclick.net','googlesyndication.com','googleadservices.com',
-      'ads.youtube.com','static.doubleclick.net','pagead2.googlesyndication.com'
-    ];
-    const _open = XMLHttpRequest.prototype.open;
-    XMLHttpRequest.prototype.open = function(m, url) {
-      if (adHosts.some(h => url.includes(h))) return;
-      return _open.apply(this, arguments);
-    };
-    const _fetch = window.fetch;
-    window.fetch = function(url, ...args) {
-      if (typeof url === 'string' && adHosts.some(h => url.includes(h))) return Promise.resolve(new Response('', {status: 200}));
-      return _fetch(url, ...args);
-    };
-  })();
-</script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { background: transparent; font-family: Arial, sans-serif; width: 400px; }
@@ -33,7 +14,7 @@
     color: #fff;
   }
 
-  #yt-frame { width: 100%; height: 220px; border-radius: 8px; border: none; display: none; }
+  #yt-player { width: 100%; height: 220px; border-radius: 8px; display: none; }
 
   #title { font-size: 15px; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 8px 0 2px; }
   #info { font-size: 13px; color: #ccc; min-height: 18px; }
@@ -55,12 +36,12 @@
 </head>
 <body>
 <div id="player-box">
-  <iframe id="yt-frame" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+  <div id="yt-player"></div>
   <div id="no-song">Nincs dal a sorban...</div>
   <div id="title"></div>
   <div id="info"></div>
   <div id="controls" style="display:none">
-    <button id="skip-btn" onclick="skipSong()">⏭ Skip</button>
+    <button onclick="skipSong()">⏭ Skip</button>
     <div id="vol-wrap">
       <label>🔊</label>
       <input type="range" id="vol" min="0" max="100" value="80" oninput="setVol(this.value)">
@@ -70,6 +51,7 @@
   <div id="queue"><h4>Sor:</h4><div id="queue-list"></div></div>
 </div>
 
+<script src="https://www.youtube.com/iframe_api"></script>
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-app.js";
   import { getDatabase, ref, onValue, remove } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-database.js";
@@ -87,8 +69,46 @@
   const db = getDatabase(app);
   const queueRef = ref(db, 'queue');
 
+  let ytPlayer = null;
+  let ytReady = false;
   let currentKey = null;
   let queue = [];
+  let pendingSong = null;
+
+  // YT API callback globálisan kell
+  window.onYouTubeIframeAPIReady = () => {
+    ytPlayer = new YT.Player('yt-player', {
+      height: '220',
+      width: '100%',
+      playerVars: { autoplay: 1, rel: 0, iv_load_policy: 3, modestbranding: 1 },
+      events: {
+        onReady: () => {
+          ytReady = true;
+          ytPlayer.setVolume(80);
+          if (pendingSong) { loadSong(pendingSong); pendingSong = null; }
+        },
+        onStateChange: (e) => {
+          // Dal vége: 0 = ended
+          if (e.data === YT.PlayerState.ENDED) skipSong();
+        }
+      }
+    });
+  };
+
+  function loadSong({ key, song }) {
+    currentKey = key;
+    ytPlayer.loadVideoById(song.videoId);
+    document.getElementById('yt-player').style.display = 'block';
+    document.getElementById('no-song').style.display = 'none';
+    document.getElementById('title').textContent = song.title;
+    document.getElementById('info').textContent = '🎵 Kérte: ' + song.requester;
+    document.getElementById('controls').style.display = 'flex';
+  }
+
+  function playSong(key, song) {
+    if (!ytReady) { pendingSong = { key, song }; return; }
+    loadSong({ key, song });
+  }
 
   onValue(queueRef, (snap) => {
     const data = snap.val();
@@ -99,25 +119,14 @@
       playSong(...queue[0]);
     } else if (queue.length === 0) {
       currentKey = null;
-      document.getElementById('yt-frame').style.display = 'none';
-      document.getElementById('yt-frame').src = '';
+      if (ytReady) ytPlayer.stopVideo();
+      document.getElementById('yt-player').style.display = 'none';
       document.getElementById('no-song').style.display = 'block';
       document.getElementById('controls').style.display = 'none';
       document.getElementById('title').textContent = '';
       document.getElementById('info').textContent = '';
     }
   });
-
-  function playSong(key, song) {
-    currentKey = key;
-    const frame = document.getElementById('yt-frame');
-    frame.src = `https://www.youtube-nocookie.com/embed/${song.videoId}?autoplay=1&mute=0&enablejsapi=1&iv_load_policy=3&rel=0`;
-    frame.style.display = 'block';
-    document.getElementById('no-song').style.display = 'none';
-    document.getElementById('title').textContent = song.title;
-    document.getElementById('info').textContent = '🎵 Kérte: ' + song.requester;
-    document.getElementById('controls').style.display = 'flex';
-  }
 
   function renderQueue() {
     const list = document.getElementById('queue-list');
@@ -134,13 +143,13 @@
     if (!currentKey) return;
     const key = currentKey;
     currentKey = null;
-    document.getElementById('yt-frame').src = '';
+    if (ytReady) ytPlayer.stopVideo();
     await remove(ref(db, 'queue/' + key));
   };
 
   window.setVol = (v) => {
     document.getElementById('vol-label').textContent = v + '%';
-    // OBS-ben a hangerőt az OBS maga kezeli, az iframe volume nem érhető el cross-origin miatt
+    if (ytReady) ytPlayer.setVolume(Number(v));
   };
 </script>
 </body>
